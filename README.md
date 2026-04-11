@@ -1,5 +1,9 @@
 # Bongo Cat
 
+<p align="center">
+  <img src="asset/preview.png" alt="Bongo Cat preview" />
+</p>
+
 Bongo Cat animation running on an **ESP32-C3** driving a **128×64 SSD1306 OLED** over I²C. The cat's paws are controlled live from your PC keyboard over USB serial — type on the left half of the keyboard and the cat's right paw drops, type on the right half and the left paw drops, hit space and both paws come down.
 
 - **Hardware:** ESP32-C3 DevKitM-1 + SSD1306 (I²C, address `0x3C`)
