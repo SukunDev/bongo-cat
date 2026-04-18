@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useBridge } from '@renderer/hooks/useBridge'
 
 export const Route = createFileRoute('/')({
@@ -198,21 +198,29 @@ function RouteComponent(): React.JSX.Element {
           </span>
         </div>
         <div
-          className="flex gap-2 halftone-bg px-2 py-1 border-[2px] border-black/50"
+          className="flex items-center gap-3"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          <button
-            className="w-3 h-3 bg-secondary border-[1.5px] border-black hover:scale-110 transition-transform"
-            onClick={() => window.api.window.minimize()}
-          />
-          <button
-            className="w-3 h-3 bg-tertiary border-[1.5px] border-black hover:scale-110 transition-transform"
-            onClick={() => window.api.window.maximize()}
-          />
-          <button
-            className="w-3 h-3 bg-error border-[1.5px] border-black hover:scale-110 transition-transform"
-            onClick={() => window.api.window.close()}
-          />
+          <Link
+            to="/settings"
+            className="w-7 h-7 bg-surface-high border-[2px] border-black flex items-center justify-center text-on-surface-variant hover:bg-primary hover:text-black transition-colors"
+          >
+            <span className="material-symbols-outlined text-sm">settings</span>
+          </Link>
+          <div className="flex gap-2 halftone-bg px-2 py-1 border-[2px] border-black/50">
+            <button
+              className="w-3 h-3 bg-secondary border-[1.5px] border-black hover:scale-110 transition-transform"
+              onClick={() => window.api.window.minimize()}
+            />
+            <button
+              className="w-3 h-3 bg-tertiary border-[1.5px] border-black hover:scale-110 transition-transform"
+              onClick={() => window.api.window.maximize()}
+            />
+            <button
+              className="w-3 h-3 bg-error border-[1.5px] border-black hover:scale-110 transition-transform"
+              onClick={() => window.api.window.close()}
+            />
+          </div>
         </div>
       </header>
 

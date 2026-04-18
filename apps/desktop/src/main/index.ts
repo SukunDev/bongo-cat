@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { app, shell, BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, nativeTheme, Tray, Menu } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -8,10 +8,14 @@ import { startBridge, stopBridge, sendToBridge } from './lib/bridge'
 
 const Store = (ElectronStore as any).default || ElectronStore
 
+let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+let isQuitting = false
+
 function createWindow(): BrowserWindow {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 500,
-    height: 400,
+    height: 450,
     show: false,
     frame: false,
     autoHideMenuBar: true,
@@ -24,7 +28,7 @@ function createWindow(): BrowserWindow {
 
   nativeTheme.themeSource = 'dark'
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    mainWindow!.show()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -41,6 +45,40 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
+function createTray(): void {
+  if (tray) return
+  tray = new Tray(icon)
+  tray.setToolTip('Bongo Cat')
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: 'Show',
+        click: (): void => {
+          mainWindow?.show()
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        click: (): void => {
+          isQuitting = true
+          app.quit()
+        }
+      }
+    ])
+  )
+  tray.on('double-click', () => {
+    mainWindow?.show()
+  })
+}
+
+function destroyTray(): void {
+  if (tray) {
+    tray.destroy()
+    tray = null
+  }
+}
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.bongocat.desktop')
 
@@ -49,6 +87,14 @@ app.whenReady().then(() => {
   })
 
   const store = new Store()
+
+  // Apply saved auto-launch setting
+  const autoLaunch = store.get('settings.openOnStartup', false)
+  app.setLoginItemSettings({ openAtLogin: autoLaunch as boolean })
+
+  // Apply saved system tray setting
+  const useTray = store.get('settings.systemTray', false)
+  if (useTray) createTray()
 
   // Window controls
   ipcMain.on('window:minimize', (e) => {
@@ -62,7 +108,12 @@ app.whenReady().then(() => {
   })
   ipcMain.on('window:close', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
-    win?.close()
+    const trayEnabled = store.get('settings.systemTray', false)
+    if (trayEnabled && !isQuitting) {
+      win?.hide()
+    } else {
+      win?.close()
+    }
   })
 
   // Store
@@ -77,13 +128,25 @@ app.whenReady().then(() => {
     return true
   })
 
+  // Settings IPC
+  ipcMain.on('settings:autoLaunch', (_event, enabled: boolean) => {
+    app.setLoginItemSettings({ openAtLogin: enabled })
+  })
+  ipcMain.on('settings:systemTray', (_event, enabled: boolean) => {
+    if (enabled) {
+      createTray()
+    } else {
+      destroyTray()
+    }
+  })
+
   // Bridge IPC
   ipcMain.on('bridge-command', (_event, command) => {
     sendToBridge(command)
   })
 
-  const mainWindow = createWindow()
-  startBridge(mainWindow)
+  const win = createWindow()
+  startBridge(win)
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

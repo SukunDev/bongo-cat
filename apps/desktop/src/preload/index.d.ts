@@ -30,6 +30,10 @@ declare global {
         onEvent: (callback: (event: BridgeEvent) => void) => void
         sendCommand: (command: object) => void
       }
+      settings: {
+        setAutoLaunch: (enabled: boolean) => void
+        setSystemTray: (enabled: boolean) => void
+      }
     }
   }
 }

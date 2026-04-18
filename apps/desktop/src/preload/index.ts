@@ -20,6 +20,10 @@ const api = {
     sendCommand: (command: object) => {
       ipcRenderer.send('bridge-command', command)
     }
+  },
+  settings: {
+    setAutoLaunch: (enabled: boolean) => ipcRenderer.send('settings:autoLaunch', enabled),
+    setSystemTray: (enabled: boolean) => ipcRenderer.send('settings:systemTray', enabled)
   }
 }
 
