@@ -4,12 +4,12 @@
   <img src="asset/preview.png" alt="Bongo Cat preview" />
 </p>
 
-Bongo Cat animation running on an **ESP32-C3** driving a **128×64 SSD1306 OLED** over I²C. The cat's paws are controlled live from your PC keyboard over USB serial — type on the left half of the keyboard and the cat's right paw drops, type on the right half and the left paw drops, hit space and both paws come down.
+Bongo Cat animation running on an **ESP32-C3** driving a **128×64 SSD1306 OLED** over I²C. The cat's paws are controlled live from your PC keyboard — type with your left hand and the cat's left paw drops, type with your right hand and the right paw drops, hit space / enter / backspace and both paws come down. After 10 seconds of no typing the cat falls asleep with closed eyes and floating "Zzz".
 
 - **Hardware:** ESP32-C3 DevKitM-1 + SSD1306 (I²C, address `0x3C`)
 - **Framework:** PlatformIO + Arduino
-- **Desktop app:** Electron + React 19 + TypeScript
-- **Bridge:** Python (pynput, pyserial, bleak)
+- **Desktop app:** Electron 35 + React 19 + TypeScript + Tailwind 4 (neobrutalist UI)
+- **Bridge:** Python (pyserial, bleak, pynput fallback, `GetAsyncKeyState` on Windows)
 - **Simulation:** Wokwi (VS Code extension)
 
 ## Repository
@@ -25,7 +25,7 @@ Bongo Cat animation running on an **ESP32-C3** driving a **128×64 SSD1306 OLED*
 | `SDA`   | `GPIO6`  |
 | `SCL`   | `GPIO7`  |
 
-I²C clock runs at **400 kHz** (fast mode) so frames refresh in ~25 ms. The OLED has no reset pin (`OLED_RESET = -1`). If you change the pins in [esp32/src/main.cpp](esp32/src/main.cpp), update [esp32/diagram.json](esp32/diagram.json) to match or Wokwi will silently fail to render.
+I²C clock runs at **400 kHz** (fast mode) so frames refresh in ~25 ms. The OLED has no reset pin (`OLED_RESET = -1`). Bitmap frames are 128×40 pixels drawn at the top of the 64-pixel display. If you change pins in [esp32/src/main.cpp](esp32/src/main.cpp), update [esp32/diagram.json](esp32/diagram.json) to match or Wokwi will silently fail to render.
 
 ## Getting started
 
@@ -94,9 +94,13 @@ Environment name is `esp32-c3-devkitm-1`.
 2. Open [esp32/diagram.json](esp32/diagram.json) in VS Code and run the **Wokwi: Start Simulator** command.
 3. Wiring and the SSD1306 part are already defined; no extra setup needed.
 
+### Sleep animation
+
+The firmware tracks `lastInputTime` from serial events. After 10 seconds with no input (and both paws up), the display switches to a sleep loop — closed eyes + three "z" characters that float up and down every 500 ms. Any keystroke resets the timer and snaps back to the normal animation instantly.
+
 ## Desktop app
 
-The desktop app is an Electron + React GUI that spawns the Python bridge as a child process and displays connection status.
+The desktop app is an Electron + React GUI that spawns the Python bridge as a child process, listens for bridge events via IPC, and visualizes the cat's state in real time.
 
 ```bash
 cd apps/desktop
@@ -108,11 +112,23 @@ npm run dev
 npm run build
 ```
 
+### Features
+
+- **Live bongo cat visualization** — CSS-rendered cat with animated paws that mirror the physical device
+- **Sleep mode** — after 10 s of no input, the on-screen cat closes its eyes and shows floating "Zzz"
+- **Connection status** — USB (with auto-detected COM port) and BLE indicators
+- **Settings page** — "Open on Startup" (uses `app.setLoginItemSettings`) and "System Tray" (minimize to tray, double-click icon to restore)
+- **Frameless window** with custom title bar (drag region + traffic-light window controls)
+
+### Launch script note
+
+The `dev` and `preview` scripts go through `scripts/launch.js` instead of calling `electron-vite` directly. This is because VSCode / Claude Code terminals set `ELECTRON_RUN_AS_NODE=1`, which would force Electron to run as plain Node.js (making `require('electron')` return the binary path string rather than the API). The launch script strips that env var before spawning electron-vite.
+
 ## Controlling the cat
 
 ### Serial protocol
 
-The firmware listens on the default USB serial port at **115200 baud** and accepts single-character commands:
+The firmware listens on USB serial at **115200 baud** and accepts single-character commands:
 
 | Char | Action             |
 |------|--------------------|
@@ -121,11 +137,11 @@ The firmware listens on the default USB serial port at **115200 baud** and accep
 | `R`  | right paw down     |
 | `r`  | right paw up       |
 
-Frames are only redrawn when the `left`/`right` state actually changes, so there's no flicker and the RX buffer stays empty even under rapid input.
+Frames are only redrawn when the `left`/`right` state actually changes.
 
 ### Keyboard bridge
 
-The Python bridge (`apps/bridge/`) captures keyboard events and streams paw commands to the ESP32. Mapping is **mirrored**: right-hand keyboard keys move the cat's **left** paw (and vice versa), matching the cat facing the user.
+The Python bridge (`apps/bridge/`) captures keyboard events system-wide and streams paw commands to the ESP32.
 
 **Standalone usage** (without the desktop app):
 
@@ -133,19 +149,21 @@ The Python bridge (`apps/bridge/`) captures keyboard events and streams paw comm
 py apps/bridge/main.py
 ```
 
-**Key mapping:**
+**Key mapping (direct — no mirror):**
 
 | Keyboard area | Keys | Drives |
 |---------------|------|--------|
-| Left half     | `Q W E R T`, `A S D F G`, `Z X C V B`, `1–5` | right paw |
-| Right half    | `Y U I O P`, `H J K L ;`, `N M , . /`, `6–0` | left paw  |
-| Space         | —    | both paws |
+| Left hand     | `Q W E R T`, `A S D F G`, `Z X C V B`, `1–5`, Left Shift/Ctrl/Alt/Win, Caps Lock | left paw |
+| Right hand    | `Y U I O P`, `H J K L ;`, `N M , . /`, `6–0`, Right Shift/Ctrl/Alt/Win, arrow keys, Home/End/PgUp/PgDn | right paw |
+| Both          | Space, Enter, Backspace, Delete, Tab, Escape | both paws |
 
-The bridge also supports BLE connections (~30 second active sessions) and auto-detects the ESP32 via USB VID:PID scanning.
+On **Windows**, the bridge uses `GetAsyncKeyState` polling at 1 kHz for reliable detection in subprocess contexts (where pynput's `SetWindowsHookEx` hooks don't receive events). On macOS/Linux it falls back to pynput.
+
+The bridge also auto-detects the ESP32 via USB VID/PID scanning and has a BLE scanner skeleton (actual BLE transport on the ESP32 side is not implemented yet).
 
 ### Legacy standalone script
 
-A simpler standalone script is also available at [esp32/tools/bongo_keymap.py](esp32/tools/bongo_keymap.py) for direct serial control without the bridge architecture:
+A simpler standalone script is available at [esp32/tools/bongo_keymap.py](esp32/tools/bongo_keymap.py) for direct serial control without the bridge architecture:
 
 ```bash
 python esp32/tools/bongo_keymap.py COM3
@@ -157,8 +175,8 @@ python esp32/tools/bongo_keymap.py COM3
 bongo-cat/
 ├── esp32/                        # ESP32-C3 firmware
 │   ├── src/
-│   │   ├── main.cpp              # Arduino entry point
-│   │   └── animate.h             # Four 128×64 PROGMEM bitmaps
+│   │   ├── main.cpp              # Arduino entry point with sleep mode
+│   │   └── animate.h             # Four 128×40 PROGMEM bitmaps
 │   ├── tools/
 │   │   └── bongo_keymap.py       # Legacy standalone keyboard bridge
 │   ├── diagram.json              # Wokwi wiring
@@ -166,18 +184,25 @@ bongo-cat/
 │   └── platformio.ini            # Board, framework, lib deps
 ├── apps/
 │   ├── bridge/                   # Python bridge
-│   │   ├── main.py               # Orchestrator
+│   │   ├── main.py               # Orchestrator (queue-based serial writer)
 │   │   ├── protocol.py           # JSON lines stdio helpers
-│   │   ├── keyboard.py           # Keyboard listener
+│   │   ├── keyboard.py           # GetAsyncKeyState polling + pynput fallback
 │   │   ├── serial_conn.py        # USB serial auto-detect
-│   │   ├── ble_conn.py           # BLE connection (skeleton)
+│   │   ├── ble_conn.py           # BLE skeleton (bleak)
 │   │   └── requirements.txt
 │   └── desktop/                  # Electron + React GUI
+│       ├── scripts/launch.js     # Strips ELECTRON_RUN_AS_NODE
 │       ├── src/
-│       │   ├── main/             # Electron main process + bridge spawner
-│       │   ├── preload/          # Bridge IPC exposure
-│       │   └── renderer/         # React app
+│       │   ├── main/             # Electron main process + bridge spawner + tray
+│       │   ├── preload/          # IPC exposure (window/store/bridge/settings)
+│       │   └── renderer/         # React app (TanStack Router, Tailwind, shadcn)
+│       │       └── src/routes/
+│       │           ├── index.tsx        # Main page with CSS bongo cat
+│       │           └── settings.tsx     # Settings toggles
 │       └── package.json
+├── docs/
+│   └── superpowers/              # Design specs and implementation plans
+├── stitch_export/                # Google Stitch design references
 ├── asset/
 │   └── preview.png
 ├── README.md
@@ -190,13 +215,16 @@ bongo-cat/
 - [adafruit/Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306) (pulls in Adafruit GFX transitively)
 
 **Python bridge:**
-- [pynput](https://pypi.org/project/pynput/) — keyboard listener
 - [pyserial](https://pypi.org/project/pyserial/) — USB serial communication
 - [bleak](https://pypi.org/project/bleak/) — Bluetooth BLE
+- [pynput](https://pypi.org/project/pynput/) — keyboard listener (non-Windows fallback)
 
 **Desktop:**
-- [Electron](https://www.electronjs.org/) + [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
+- [Electron 35](https://www.electronjs.org/) + [React 19](https://react.dev/) + [TypeScript 5](https://www.typescriptlang.org/)
 - [electron-vite](https://electron-vite.org/) — build tooling
+- [TanStack Router](https://tanstack.com/router) + [TanStack Query](https://tanstack.com/query) — routing & state
+- [Tailwind CSS 4](https://tailwindcss.com/) + shadcn/ui — styling
+- [electron-store](https://www.npmjs.com/package/electron-store) — settings persistence
 
 ## Author
 
