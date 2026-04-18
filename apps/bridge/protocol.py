@@ -12,14 +12,24 @@ def send_event(event: dict) -> None:
 
 
 def read_command() -> dict | None:
-    """Read a JSON line from stdin (Electron -> Bridge). Returns None on EOF."""
-    try:
-        line = sys.stdin.readline()
-        if not line:
+    """Read a JSON line from stdin (Electron -> Bridge).
+
+    Returns None only on EOF. Ignores malformed (non-JSON) lines
+    so that stray terminal input doesn't kill the bridge.
+    """
+    while True:
+        try:
+            line = sys.stdin.readline()
+            if not line:
+                return None  # EOF
+            line = line.strip()
+            if not line:
+                continue  # blank line
+            return json.loads(line)
+        except json.JSONDecodeError:
+            continue  # ignore non-JSON input
+        except EOFError:
             return None
-        return json.loads(line.strip())
-    except (json.JSONDecodeError, EOFError):
-        return None
 
 
 def send_status(connection: str, state: str, **extra) -> None:
