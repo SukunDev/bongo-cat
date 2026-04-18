@@ -6,7 +6,7 @@ import readline from 'readline'
 let bridgeProcess: ChildProcess | null = null
 
 function getBridgePath(): string {
-  return path.resolve(app.getAppPath(), '..', '..', 'bridge', 'main.py')
+  return path.resolve(app.getAppPath(), '..', 'bridge', 'main.py')
 }
 
 export function startBridge(mainWindow: BrowserWindow): void {
@@ -28,8 +28,8 @@ export function startBridge(mainWindow: BrowserWindow): void {
     }
   })
 
-  bridgeProcess.stderr.on('data', (data: Buffer) => {
-    console.error('[bridge stderr]', data.toString())
+  bridgeProcess.stderr.on('data', () => {
+    // bridge stderr ignored — debug output only
   })
 
   bridgeProcess.on('exit', (code: number | null) => {

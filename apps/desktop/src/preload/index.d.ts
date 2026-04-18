@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { ElectronAPI } from '@electron-toolkit/preload'
 
 interface BridgeEvent {
@@ -11,14 +12,24 @@ interface BridgeEvent {
   message?: string
 }
 
-interface BridgeAPI {
-  onEvent: (callback: (event: BridgeEvent) => void) => void
-  sendCommand: (command: object) => void
-}
-
 declare global {
   interface Window {
     electron: ElectronAPI
-    bridgeAPI: BridgeAPI
+    api: {
+      window: {
+        minimize: () => Promise<void>
+        maximize: () => Promise<void>
+        close: () => Promise<void>
+      }
+      store: {
+        set: (name: string, value: any) => Promise<void>
+        get: (name: string) => Promise<any>
+        clear: () => Promise<boolean>
+      }
+      bridge: {
+        onEvent: (callback: (event: BridgeEvent) => void) => void
+        sendCommand: (command: object) => void
+      }
+    }
   }
 }
