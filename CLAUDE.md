@@ -4,39 +4,84 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Bongo Cat animation for an ESP32-C3 driving a 128x64 SSD1306 OLED over I²C. Built with PlatformIO + Arduino framework. Simulated in Wokwi.
+Bongo Cat — a monorepo with three components:
+
+1. **`esp32/`** — Firmware for ESP32-C3 driving a 128×64 SSD1306 OLED over I²C. PlatformIO + Arduino framework, simulated in Wokwi.
+2. **`apps/bridge/`** — Python process that listens to the keyboard, auto-detects the ESP32 via USB serial or BLE, and streams paw commands (`L`/`l`/`R`/`r`).
+3. **`apps/desktop/`** — Electron + React 19 + TypeScript GUI. Spawns the bridge as a child process and communicates via JSON lines on stdio.
 
 ## Commands
 
-All commands assume PlatformIO CLI is available (via the VSCode extension or `pio` on PATH).
+### ESP32 Firmware (`esp32/`)
+
+All commands run from `esp32/`:
 
 - Build: `pio run`
-- Upload to device: `pio run -t upload`
-- Serial monitor: `pio device monitor -b 115200`
+- Upload: `pio run -t upload`
+- Serial monitor: `pio device monitor` (monitor_speed set in platformio.ini)
 - Clean: `pio run -t clean`
-- Wokwi simulation: build first (`pio run`) so `.pio/build/esp32-c3-devkitm-1/firmware.{bin,elf}` exists, then launch the Wokwi VS Code extension on `diagram.json` / `wokwi.toml`.
+- Wokwi: build first, then launch Wokwi extension on `diagram.json`
 
-Environment name is `esp32-c3-devkitm-1` — pass `-e esp32-c3-devkitm-1` if multiple envs are ever added.
+Environment name is `esp32-c3-devkitm-1`.
 
-There is no test suite (`test/` contains only the PlatformIO placeholder README).
+### Python Bridge (`apps/bridge/`)
 
-## Hardware Wiring (fixed in firmware and `diagram.json`)
+```bash
+pip install -r apps/bridge/requirements.txt
+py apps/bridge/main.py              # standalone (reads stdin, writes stdout)
+echo '{"type":"quit"}' | py apps/bridge/main.py   # quick test
+```
 
-- I²C: `SDA = GPIO5`, `SCL = GPIO6`, clock 100 kHz
+### Desktop App (`apps/desktop/`)
+
+```bash
+cd apps/desktop
+npm install
+npm run dev       # dev mode with hot reload
+npm run build     # production build to out/
+```
+
+## Hardware Wiring (fixed in firmware and `esp32/diagram.json`)
+
+- I²C: `SDA = GPIO6`, `SCL = GPIO7`, clock 400 kHz
 - SSD1306 address: `0x3C`, 128×64, no reset pin (`OLED_RESET = -1`)
 
-If you change pins in `src/main.cpp`, update `diagram.json` to match or Wokwi will silently fail to render.
+If you change pins in `esp32/src/main.cpp`, update `esp32/diagram.json` to match or Wokwi will silently fail to render.
 
 ## Architecture
 
-Two files, both in `src/`:
+### Communication flow
 
-- [src/main.cpp](src/main.cpp) — Arduino entry point. `setup()` starts Serial at 115200, brings up `Wire` on the SDA/SCL pins above, runs `scanI2C()` (diagnostic scan that labels known addresses for SSD1306/MPU6050), then initializes the `Adafruit_SSD1306` display instance. `loop()` is where animation frames get drawn.
-- [src/animate.h](src/animate.h) — Four full-screen (128×64, 1024-byte) monochrome bitmaps in `PROGMEM`: `_pawsonair`, `_rightpawontable`, `_leftpawontable`, `_pawsontable`. These are the bongo cat animation frames, drawn via `display.drawBitmap(0, 0, <frame>, 128, 64, SSD1306_WHITE)`. The header is plain data — no functions — so whatever animation logic exists lives in `main.cpp`.
+```
+Keyboard → [apps/bridge] → USB Serial / BLE → [ESP32] → OLED
+                ↕ stdio JSON lines
+          [apps/desktop] (Electron GUI)
+```
 
-The only external dependency is `adafruit/Adafruit SSD1306` (pulls in `Adafruit GFX` transitively), declared in [platformio.ini](platformio.ini).
+### ESP32 firmware (`esp32/src/`)
+
+- `main.cpp` — `setup()` inits I²C + OLED, `handleSerialInput()` reads `L`/`l`/`R`/`r` from serial, `drawFrame()` only redraws on state change.
+- `animate.h` — Four 128×64 PROGMEM bitmaps: `_pawsonair`, `_leftpawontable`, `_rightpawontable`, `_pawsontable`.
+
+### Python bridge (`apps/bridge/`)
+
+- `protocol.py` — JSON lines stdio helpers (`send_event`, `read_command`, etc.)
+- `keyboard.py` — pynput listener, QWERTY left/right split with mirror mapping
+- `serial_conn.py` — USB serial auto-detect (VID:PID scan) with auto-reconnect
+- `ble_conn.py` — BLE via bleak, ~30s active then standby (skeleton)
+- `main.py` — Orchestrator: ties keyboard + serial + BLE, reads stdin commands, writes stdout events
+
+### Desktop app (`apps/desktop/src/`)
+
+- `main/index.ts` — Electron main process, spawns bridge
+- `main/bridge.ts` — Child process manager for bridge (spawn, relay stdio, kill on quit)
+- `preload/index.ts` — Exposes `bridgeAPI` (onEvent, sendCommand) to renderer
+- `renderer/src/App.tsx` — React shell showing connection status (USB, BLE, bridge, last key)
 
 ## Conventions
 
-- Bitmap frames are stored as `const unsigned char <name>[] PROGMEM` — keep new frames in `animate.h` in the same format and always at 128×64 to match the display.
-- Any new I²C peripheral should be added to the address labeler in `scanI2C()` so boot logs stay readable.
+- Bitmap frames: `const unsigned char <name>[] PROGMEM` in `animate.h`, always 128×64.
+- New I²C peripherals: add to `scanI2C()` address labeler.
+- Bridge modules: each is standalone-importable and testable without Electron.
+- Bridge ↔ Electron protocol: JSON lines on stdio, defined in `protocol.py` and typed in `preload/index.d.ts`.
+- USB serial takes priority over BLE when both are available.

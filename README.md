@@ -8,8 +8,9 @@ Bongo Cat animation running on an **ESP32-C3** driving a **128×64 SSD1306 OLED*
 
 - **Hardware:** ESP32-C3 DevKitM-1 + SSD1306 (I²C, address `0x3C`)
 - **Framework:** PlatformIO + Arduino
+- **Desktop app:** Electron + React 19 + TypeScript
+- **Bridge:** Python (pynput, pyserial, bleak)
 - **Simulation:** Wokwi (VS Code extension)
-- **Host input:** Python script captures keystrokes and streams commands over serial
 
 ## Repository
 
@@ -24,14 +25,15 @@ Bongo Cat animation running on an **ESP32-C3** driving a **128×64 SSD1306 OLED*
 | `SDA`   | `GPIO6`  |
 | `SCL`   | `GPIO7`  |
 
-I²C clock runs at **400 kHz** (fast mode) so frames refresh in ~25 ms. The OLED has no reset pin (`OLED_RESET = -1`). If you change the pins in [src/main.cpp](src/main.cpp), update [diagram.json](diagram.json) to match or Wokwi will silently fail to render.
+I²C clock runs at **400 kHz** (fast mode) so frames refresh in ~25 ms. The OLED has no reset pin (`OLED_RESET = -1`). If you change the pins in [esp32/src/main.cpp](esp32/src/main.cpp), update [esp32/diagram.json](esp32/diagram.json) to match or Wokwi will silently fail to render.
 
 ## Getting started
 
 ### 1. Prerequisites
 
 - [Git](https://git-scm.com/downloads)
-- [Python 3.8+](https://www.python.org/downloads/) (only needed for the keyboard bridge script)
+- [Node.js 20+](https://nodejs.org/) (for the desktop app)
+- [Python 3.8+](https://www.python.org/downloads/) (for the bridge)
 - [PlatformIO Core](https://platformio.org/install/cli) — install via `pip` or as part of the [PlatformIO VS Code extension](https://platformio.org/install/ide?install=vscode)
   ```bash
   pip install -U platformio
@@ -47,25 +49,33 @@ git clone https://github.com/SukunDev/bongo-cat.git
 cd bongo-cat
 ```
 
-### 3. Install project dependencies
+### 3. Install dependencies
 
-Arduino libraries are declared in [platformio.ini](platformio.ini) and fetched automatically on the first build — you don't need to install them manually:
+**ESP32 firmware** — Arduino libraries are fetched automatically on first build:
 
 ```bash
-pio run
+cd esp32 && pio run
 ```
 
-The first build will download the ESP32 toolchain, the Arduino framework, and `Adafruit SSD1306` (plus `Adafruit GFX`). Subsequent builds are incremental and fast.
-
-Python dependencies for the host-side keyboard bridge:
+**Python bridge:**
 
 ```bash
-pip install pyserial pynput
+pip install -r apps/bridge/requirements.txt
 ```
 
-## Build & upload
+**Desktop app:**
 
 ```bash
+cd apps/desktop && npm install
+```
+
+## ESP32 firmware
+
+### Build & upload
+
+```bash
+cd esp32
+
 # Build firmware
 pio run
 
@@ -78,11 +88,25 @@ pio device monitor
 
 Environment name is `esp32-c3-devkitm-1`.
 
-## Wokwi simulation
+### Wokwi simulation
 
-1. Build the firmware first — Wokwi reads `.pio/build/esp32-c3-devkitm-1/firmware.bin` and `firmware.elf`.
-2. Open [diagram.json](diagram.json) in VS Code and run the **Wokwi: Start Simulator** command.
+1. Build the firmware first — Wokwi reads `esp32/.pio/build/esp32-c3-devkitm-1/firmware.bin` and `firmware.elf`.
+2. Open [esp32/diagram.json](esp32/diagram.json) in VS Code and run the **Wokwi: Start Simulator** command.
 3. Wiring and the SSD1306 part are already defined; no extra setup needed.
+
+## Desktop app
+
+The desktop app is an Electron + React GUI that spawns the Python bridge as a child process and displays connection status.
+
+```bash
+cd apps/desktop
+
+# Development with hot reload
+npm run dev
+
+# Production build
+npm run build
+```
 
 ## Controlling the cat
 
@@ -99,23 +123,17 @@ The firmware listens on the default USB serial port at **115200 baud** and accep
 
 Frames are only redrawn when the `left`/`right` state actually changes, so there's no flicker and the RX buffer stays empty even under rapid input.
 
-### Keyboard bridge (`tools/bongo_keymap.py`)
+### Keyboard bridge
 
-Instead of typing `L`/`l`/`R`/`r` into a serial monitor, use the host-side Python script to stream real keystrokes. Mapping is **mirrored**: right-hand keyboard keys move the cat's **left** paw (and vice versa), matching the cat facing the user.
+The Python bridge (`apps/bridge/`) captures keyboard events and streams paw commands to the ESP32. Mapping is **mirrored**: right-hand keyboard keys move the cat's **left** paw (and vice versa), matching the cat facing the user.
 
-Install dependencies once:
-
-```bash
-pip install pyserial pynput
-```
-
-Find your ESP32-C3 serial port (`pio device list`), close any other tool that holds it, then run:
+**Standalone usage** (without the desktop app):
 
 ```bash
-python tools/bongo_keymap.py COM3
+py apps/bridge/main.py
 ```
 
-Mapping:
+**Key mapping:**
 
 | Keyboard area | Keys | Drives |
 |---------------|------|--------|
@@ -123,35 +141,62 @@ Mapping:
 | Right half    | `Y U I O P`, `H J K L ;`, `N M , . /`, `6–0` | left paw  |
 | Space         | —    | both paws |
 
-Press **ESC** to quit. The script tracks currently-held keys and only sends a serial byte when the derived paw state actually flips, so holding a key down doesn't flood the link.
+The bridge also supports BLE connections (~30 second active sessions) and auto-detects the ESP32 via USB VID:PID scanning.
+
+### Legacy standalone script
+
+A simpler standalone script is also available at [esp32/tools/bongo_keymap.py](esp32/tools/bongo_keymap.py) for direct serial control without the bridge architecture:
+
+```bash
+python esp32/tools/bongo_keymap.py COM3
+```
 
 ## Project layout
 
 ```
 bongo-cat/
-├── src/
-│   ├── main.cpp     # Arduino entry point: setup(), loop(), serial handler
-│   └── animate.h    # Four 128×64 PROGMEM bitmap frames
-├── tools/
-│   └── bongo_keymap.py  # Host-side keyboard → serial bridge
-├── diagram.json     # Wokwi wiring
-├── wokwi.toml       # Wokwi firmware paths
-├── platformio.ini   # Board, framework, lib deps, monitor speed
-└── CLAUDE.md        # Guidance for Claude Code sessions
+├── esp32/                        # ESP32-C3 firmware
+│   ├── src/
+│   │   ├── main.cpp              # Arduino entry point
+│   │   └── animate.h             # Four 128×64 PROGMEM bitmaps
+│   ├── tools/
+│   │   └── bongo_keymap.py       # Legacy standalone keyboard bridge
+│   ├── diagram.json              # Wokwi wiring
+│   ├── wokwi.toml                # Wokwi firmware paths
+│   └── platformio.ini            # Board, framework, lib deps
+├── apps/
+│   ├── bridge/                   # Python bridge
+│   │   ├── main.py               # Orchestrator
+│   │   ├── protocol.py           # JSON lines stdio helpers
+│   │   ├── keyboard.py           # Keyboard listener
+│   │   ├── serial_conn.py        # USB serial auto-detect
+│   │   ├── ble_conn.py           # BLE connection (skeleton)
+│   │   └── requirements.txt
+│   └── desktop/                  # Electron + React GUI
+│       ├── src/
+│       │   ├── main/             # Electron main process + bridge spawner
+│       │   ├── preload/          # Bridge IPC exposure
+│       │   └── renderer/         # React app
+│       └── package.json
+├── asset/
+│   └── preview.png
+├── README.md
+└── CLAUDE.md
 ```
-
-Animation frames live in [src/animate.h](src/animate.h) as four full-screen monochrome bitmaps stored in `PROGMEM`:
-
-- `_pawsonair` — both paws in the air
-- `_leftpawontable` — left paw down
-- `_rightpawontable` — right paw down
-- `_pawsontable` — both paws down
 
 ## Dependencies
 
+**ESP32:**
 - [adafruit/Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306) (pulls in Adafruit GFX transitively)
 
-Declared in [platformio.ini](platformio.ini); PlatformIO fetches them on first build.
+**Python bridge:**
+- [pynput](https://pypi.org/project/pynput/) — keyboard listener
+- [pyserial](https://pypi.org/project/pyserial/) — USB serial communication
+- [bleak](https://pypi.org/project/bleak/) — Bluetooth BLE
+
+**Desktop:**
+- [Electron](https://www.electronjs.org/) + [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
+- [electron-vite](https://electron-vite.org/) — build tooling
 
 ## Author
 
