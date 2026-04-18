@@ -1,6 +1,7 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, shell, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { startBridge, stopBridge, sendToBridge } from './bridge'
 
 function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
@@ -39,7 +40,13 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  createWindow()
+  const mainWindow = createWindow()
+
+  ipcMain.on('bridge-command', (_event, command) => {
+    sendToBridge(command)
+  })
+
+  startBridge(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -47,6 +54,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  stopBridge()
   if (process.platform !== 'darwin') {
     app.quit()
   }
